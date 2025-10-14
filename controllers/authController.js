@@ -9,7 +9,7 @@ exports.register = async (req, res) => {
   try {
     const { name, email, password, confirmPassword } = req.body;
 
-    // Validation (same as above)
+    // Validation
     if (!name || !email || !password || !confirmPassword) {
       return res.status(400).json({
         success: false,
@@ -24,6 +24,13 @@ exports.register = async (req, res) => {
       });
     }
 
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long'
+      });
+    }
+
     // Check if user exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
@@ -33,16 +40,27 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Create user (auto-verified in development)
+    // Create user with status
     const user = new User({
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password,
+      status: 'user', // Default status for new users
       isVerified: process.env.NODE_ENV === 'development' // Auto-verify in dev
     });
 
     await user.save();
-    await sendWelcomeEmail(user.email, user.name);
+    
+    // Send welcome email only if verified
+    if (user.isVerified) {
+      await sendWelcomeEmail(user.email, user.name);
+    } else {
+      // Send verification email if not auto-verified
+      const verificationCode = user.generateVerificationCode();
+      await user.save();
+      await sendVerificationEmail(user.email, verificationCode, user.name);
+    }
+
     // Generate token
     const token = generateToken(user._id);
 
@@ -50,7 +68,7 @@ exports.register = async (req, res) => {
       success: true,
       message: process.env.NODE_ENV === 'development' 
         ? 'Registration successful (auto-verified in development)' 
-        : 'Registration successful',
+        : 'Registration successful. Please verify your email.',
       data: {
         user: {
           id: user._id,
@@ -78,8 +96,15 @@ exports.verifyEmail = async (req, res) => {
   try {
     const { email, verificationCode } = req.body;
 
+    if (!email || !verificationCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and verification code are required'
+      });
+    }
+
     const user = await User.findOne({ 
-      email, 
+      email: email.toLowerCase(), 
       verificationCode,
       verificationCodeExpires: { $gt: Date.now() }
     });
@@ -92,6 +117,7 @@ exports.verifyEmail = async (req, res) => {
     }
 
     user.isVerified = true;
+    user.status = 'user'; // Activate user status after verification
     user.verificationCode = undefined;
     user.verificationCodeExpires = undefined;
     await user.save();
@@ -113,7 +139,7 @@ exports.verifyEmail = async (req, res) => {
           id: user._id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          status: user.status,
           isVerified: user.isVerified
         }
       }
@@ -134,7 +160,14 @@ exports.resendVerificationCode = async (req, res) => {
   try {
     const { email } = req.body;
 
-    const user = await User.findOne({ email });
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -185,20 +218,59 @@ exports.login = async (req, res) => {
     }
 
     // Find user and include password for comparison
-    const user = await User.findOne({ email, isActive: true }).select('+password');
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials'
+        message: 'Invalid email or password'
+      });
+    }
+
+    // Check user status
+    if (user.status === 'suspended') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    if (user.status === 'banned') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been permanently banned.'
+      });
+    }
+
+    if (user.status === 'inactive') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account is inactive. Please contact support to reactivate.'
+      });
+    }
+
+    if (user.status === 'pending') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account is pending approval. Please wait for administrator approval.'
+      });
+    }
+
+    // Check if account is locked
+    if (user.isLocked) {
+      return res.status(423).json({
+        success: false,
+        message: 'Account is temporarily locked due to too many failed attempts'
       });
     }
 
     // Check password
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
+      // Increment login attempts
+      await user.incrementLoginAttempts();
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials'
+        message: 'Invalid email or password'
       });
     }
 
@@ -208,6 +280,11 @@ exports.login = async (req, res) => {
         success: false,
         message: 'Please verify your email before logging in'
       });
+    }
+
+    // Reset login attempts on successful login
+    if (user.loginAttempts > 0 || user.lockUntil) {
+      await user.resetLoginAttempts();
     }
 
     // Update login statistics
@@ -229,11 +306,10 @@ exports.login = async (req, res) => {
           id: user._id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          status: user.status,
           isVerified: user.isVerified,
           loginCount: user.loginCount,
-          lastLogin: user.lastLogin,
-          profile: user.profile
+          lastLogin: user.lastLogin
         }
       }
     });
@@ -251,8 +327,15 @@ exports.login = async (req, res) => {
 // Get current user
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.id);
     
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
     res.status(200).json({
       success: true,
       data: {
@@ -260,13 +343,10 @@ exports.getMe = async (req, res) => {
           id: user._id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          status: user.status,
           isVerified: user.isVerified,
-          isActive: user.isActive,
           loginCount: user.loginCount,
           lastLogin: user.lastLogin,
-          profile: user.profile,
-          preferences: user.preferences,
           createdAt: user.createdAt
         }
       }
@@ -281,11 +361,48 @@ exports.getMe = async (req, res) => {
   }
 };
 
+// Get user status
+exports.getUserStatus = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          status: user.status,
+          isVerified: user.isVerified,
+          lastLogin: user.lastLogin,
+          createdAt: user.createdAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('User status check error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching user status',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 // Update user profile
 exports.updateProfile = async (req, res) => {
   try {
-    const { name, phone, address, preferences } = req.body;
-    const userId = req.user.userId;
+    const { name, phone, address } = req.body;
+    const userId = req.user.id;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -297,16 +414,25 @@ exports.updateProfile = async (req, res) => {
 
     // Update fields
     if (name) user.name = name;
-    if (phone) user.profile.phone = phone;
-    if (address) user.profile.address = { ...user.profile.address, ...address };
-    if (preferences) user.preferences = { ...user.preferences, ...preferences };
+    if (phone) user.phone = phone;
+    if (address) user.address = address;
 
     await user.save();
 
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',
-      data: { user }
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          status: user.status,
+          isVerified: user.isVerified,
+          phone: user.phone,
+          address: user.address
+        }
+      }
     });
 
   } catch (error) {
@@ -331,13 +457,22 @@ exports.refreshToken = async (req, res) => {
       });
     }
 
+    const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(decoded.id);
 
-    if (!user || !user.isActive) {
+    if (!user) {
       return res.status(401).json({
         success: false,
         message: 'Invalid refresh token'
+      });
+    }
+
+    // Check user status
+    if (user.status === 'suspended' || user.status === 'banned') {
+      return res.status(403).json({
+        success: false,
+        message: `Account is ${user.status}. Access denied.`
       });
     }
 
@@ -374,6 +509,32 @@ exports.logout = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error during logout'
+    });
+  }
+};
+
+// Verify token (for frontend token validation)
+exports.verifyToken = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          status: user.status,
+          isVerified: user.isVerified
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Token verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during token verification'
     });
   }
 };

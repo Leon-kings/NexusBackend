@@ -351,64 +351,58 @@ exports.validateLoginSimple = (req, res, next) => {
   next();
 };
 
-// Validation middleware
-exports.handleValidationErrors = (req, res, next) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      success: false,
-      message: 'Validation failed',
-      errors: errors.array()
-    });
+// Unified payment validation
+exports.validatePayment = [
+  body('orderId').isMongoId().withMessage('Valid order ID is required'),
+  body('paymentMethod').isIn(['stripe', 'paypack']).withMessage('Valid payment method is required'),
+  body('paymentData').isObject().withMessage('Payment data is required'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+    next();
   }
-  next();
-};
-
-// Stripe payment validation
-exports.validateStripePayment = [
-  body('orderId')
-    .notEmpty()
-    .withMessage('Order ID is required')
-    .isMongoId()
-    .withMessage('Invalid order ID'),
-  
-  body('paymentMethodId')
-    .notEmpty()
-    .withMessage('Payment method ID is required'),
-  
-  body('cardHolder')
-    .trim()
-    .notEmpty()
-    .withMessage('Card holder name is required')
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Card holder name must be between 2 and 100 characters'),
-  
-  body('saveCard')
-    .optional()
-    .isBoolean()
-    .withMessage('Save card must be a boolean value'),
-  
-  this.handleValidationErrors
 ];
 
-// Paypack payment validation
+// Stripe-specific validation
+exports.validateStripePayment = [
+  body('orderId').isMongoId().withMessage('Valid order ID is required'),
+  body('cardNumber').isLength({ min: 13, max: 19 }).withMessage('Valid card number is required'),
+  body('expiryDate').matches(/^(0[1-9]|1[0-2])\/([0-9]{2})$/).withMessage('Valid expiry date (MM/YY) is required'),
+  body('cvv').isLength({ min: 3, max: 4 }).withMessage('Valid CVV is required'),
+  body('cardHolder').notEmpty().withMessage('Card holder name is required'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Stripe payment validation failed',
+        errors: errors.array()
+      });
+    }
+    next();
+  }
+];
+
+// Paypack-specific validation
 exports.validatePaypackPayment = [
-  body('orderId')
-    .notEmpty()
-    .withMessage('Order ID is required')
-    .isMongoId()
-    .withMessage('Invalid order ID'),
-  
-  body('mobileNumber')
-    .trim()
-    .notEmpty()
-    .withMessage('Mobile number is required')
-    .matches(/^\+?[0-9\s\-\(\)]{10,}$/)
-    .withMessage('Please enter a valid mobile number'),
-  
-  body('provider')
-    .isIn(['mtn', 'airtel', 'tigo'])
-    .withMessage('Provider must be mtn, airtel, or tigo'),
-  
-  this.handleValidationErrors
+  body('orderId').isMongoId().withMessage('Valid order ID is required'),
+  body('mobileNumber').matches(/^(078|079|072|073)\d{7}$/).withMessage('Valid Rwanda mobile number is required'),
+  body('network').isIn(['mtn', 'airtel', 'tigo']).withMessage('Valid mobile network is required'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile payment validation failed',
+        errors: errors.array()
+      });
+    }
+    next();
+  }
 ];
