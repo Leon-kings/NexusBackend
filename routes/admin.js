@@ -8,10 +8,10 @@ const { protect, authorize } = require('../middleware/auth');
 // router.use(authorize('admin'));
 
 router.get('/', adminController.getAllUsers);
-router.get('/users/:id', adminController.getUserById);
-router.put('/users/:id/role', adminController.updateUserRole);
-router.patch('/users/:id/toggle-active', adminController.toggleUserActive);
-router.delete('/users/:id', adminController.deleteUser);
-router.post('/users/bulk-action', adminController.bulkAction);
+router.get('/:id', adminController.getUserById);
+router.put('/:id/role', adminController.updateUserRole);
+router.patch('/:id/toggle-active', adminController.toggleUserActive);
+router.delete('/:id', adminController.deleteUser);
+router.post('/bulk-action', adminController.bulkAction);
 
 module.exports = router;

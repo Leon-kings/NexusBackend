@@ -162,7 +162,7 @@ productSchema.statics.getInventoryStats = async function() {
             $cond: [
               { $and: [
                 { $lte: ['$stock', '$lowStockAlert'] },
-                { $gt: ['$stock', 0] }
+                { $gt: ['$stock', 0] } 
               ]},
               1,
               0

@@ -14,6 +14,8 @@ router.post('/logout', protect, authController.logout);
 
 // Protected routes
 router.get('/me', protect, authController.getMe);
+router.get('/:id', authController.getUserStatus); // Add this line
+router.get('/verify', protect, authController.verifyToken); // Add token verification endpoint
 router.put('/profile', protect, authController.updateProfile);
 
 module.exports = router;

@@ -19,11 +19,43 @@ exports.protect = async (req, res, next) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
-      const user = await User.findById(decoded.userId).select('-password');
-      if (!user || !user.isActive) {
+      // Changed from decoded.userId to decoded.id for consistency
+      const user = await User.findById(decoded.id).select('-password');
+      
+      if (!user) {
         return res.status(401).json({
           success: false,
-          message: 'User not found or account is inactive'
+          message: 'User not found'
+        });
+      }
+
+      // Check user status for access control
+      if (user.status === 'suspended' || user.status === 'banned') {
+        return res.status(403).json({
+          success: false,
+          message: `Account is ${user.status}. Access denied.`
+        });
+      }
+
+      if (user.status === 'inactive') {
+        return res.status(403).json({
+          success: false,
+          message: 'Account is inactive. Please contact support.'
+        });
+      }
+
+      if (user.status === 'pending') {
+        return res.status(403).json({
+          success: false,
+          message: 'Account is pending approval. Please wait for administrator approval.'
+        });
+      }
+
+      // Check if email is verified (optional, depending on your requirements)
+      if (!user.isVerified) {
+        return res.status(403).json({
+          success: false,
+          message: 'Please verify your email to access this resource'
         });
       }
 
@@ -45,14 +77,70 @@ exports.protect = async (req, res, next) => {
   }
 };
 
-exports.authorize = (...roles) => {
+// Middleware to authorize based on status (replaces role-based authorization)
+exports.authorize = (...statuses) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    if (!statuses.includes(req.user.status)) {
       return res.status(403).json({
         success: false,
-        message: `User role ${req.user.role} is not authorized to access this route`
+        message: `User status ${req.user.status} is not authorized to access this route`
       });
     }
     next();
   };
+};
+
+// Specific status middleware for common use cases
+exports.requireAdmin = (req, res, next) => {
+  if (req.user.status !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Admin status required to access this route'
+    });
+  }
+  next();
+};
+
+exports.requireManager = (req, res, next) => {
+  if (!['manager', 'admin'].includes(req.user.status)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Manager or Admin status required to access this route'
+    });
+  }
+  next();
+};
+
+exports.requireActive = (req, res, next) => {
+  if (!['user', 'manager', 'admin'].includes(req.user.status)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Active account required to access this route'
+    });
+  }
+  next();
+};
+
+// Middleware to check if user is verified
+exports.requireVerified = (req, res, next) => {
+  if (!req.user.isVerified) {
+    return res.status(403).json({
+      success: false,
+      message: 'Verified email required to access this route'
+    });
+  }
+  next();
+};
+
+// Optional: Middleware for self-or-admin operations
+exports.selfOrAdmin = (req, res, next) => {
+  const requestedUserId = req.params.id || req.body.userId;
+  
+  if (req.user.status !== 'admin' && req.user.id !== requestedUserId) {
+    return res.status(403).json({
+      success: false,
+      message: 'Not authorized to perform this action'
+    });
+  }
+  next();
 };

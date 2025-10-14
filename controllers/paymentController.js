@@ -1,14 +1,40 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const PaypackJs = require("paypack-js")?.default;
+require('dotenv').config();
+const crypto = require('crypto');
 const Payment = require('../models/Payment');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
-const { sendPaymentConfirmation, sendPaymentReceipt } = require('../utils/sendEmail');
+const { sendPaymentConfirmation } = require('../utils/sendEmail');
 
-// Process Stripe payment
-exports.processStripePayment = async (req, res) => {
+// Initialize Paypack client if credentials are available
+let paypack;
+if (process.env.PAYPACK_CLIENT_ID && process.env.PAYPACK_CLIENT_SECRET) {
+  paypack = new PaypackJs({ 
+    client_id: process.env.PAYPACK_CLIENT_ID, 
+    client_secret: process.env.PAYPACK_CLIENT_SECRET 
+  });
+  console.log('Paypack client initialized successfully');
+} else {
+  console.warn('Paypack credentials not found. Paypack payments will be disabled.');
+}
+
+// Initialize Stripe
+console.log('Stripe initialized:', process.env.STRIPE_SECRET_KEY ? 'Yes' : 'No');
+
+// Process payment with automatic provider selection
+exports.processPayment = async (req, res) => {
   try {
-    const { orderId, paymentMethodId, cardHolder, saveCard } = req.body;
+    const { orderId, paymentMethod, paymentData } = req.body;
     const userId = req.user.userId;
+
+    console.log('Payment initiated:', { 
+      orderId, 
+      paymentMethod, 
+      userId,
+      hasPaypack: !!paypack,
+      hasStripe: !!process.env.STRIPE_SECRET_KEY
+    });
 
     // Validate order
     const order = await Order.findById(orderId).populate('items.product');
@@ -33,14 +59,114 @@ exports.processStripePayment = async (req, res) => {
       });
     }
 
+    let paymentResult;
+
+    // Route to appropriate payment processor
+    switch (paymentMethod) {
+      case 'stripe':
+        if (!process.env.STRIPE_SECRET_KEY) {
+          return res.status(400).json({
+            success: false,
+            message: 'Stripe payments are not configured'
+          });
+        }
+        paymentResult = await processStripePayment(order, paymentData, req.user);
+        break;
+
+      case 'paypack':
+        if (!paypack) {
+          return res.status(400).json({
+            success: false,
+            message: 'Mobile payments are not configured'
+          });
+        }
+        paymentResult = await processPaypackPayment(order, paymentData, req.user);
+        break;
+
+      default:
+        return res.status(400).json({
+          success: false,
+          message: 'Unsupported payment method'
+        });
+    }
+
+    // Create payment record
+    const payment = new Payment({
+      user: userId,
+      order: orderId,
+      amount: order.total,
+      currency: order.currency,
+      paymentMethod: paymentMethod,
+      status: paymentResult.status,
+      ...paymentResult.paymentData,
+      metadata: {
+        provider: paymentMethod,
+        ...paymentResult.metadata
+      }
+    });
+
+    await payment.save();
+    console.log('Payment record created:', payment._id);
+
+    // Handle immediate successful payments
+    if (paymentResult.status === 'completed') {
+      await handleSuccessfulPayment(order, payment, req.user);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: paymentResult.message,
+      data: {
+        paymentId: payment._id,
+        status: payment.status,
+        provider: paymentMethod,
+        ...paymentResult.responseData
+      }
+    });
+
+  } catch (error) {
+    console.error('Payment processing error:', error);
+    
+    // Create failed payment record
+    if (req.body.orderId) {
+      const failedPayment = new Payment({
+        user: req.user.userId,
+        order: req.body.orderId,
+        amount: 0,
+        currency: req.body.paymentData?.currency || 'USD',
+        paymentMethod: req.body.paymentMethod,
+        status: 'failed',
+        metadata: { 
+          error: error.message,
+          stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        }
+      });
+      await failedPayment.save();
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Payment processing failed',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Payment service temporarily unavailable'
+    });
+  }
+};
+
+// Process Stripe payment
+const processStripePayment = async (order, paymentData, user) => {
+  try {
+    const { paymentMethodId, cardHolder, saveCard } = paymentData;
+
+    console.log('Processing Stripe payment for order:', order._id);
+
     // Create or retrieve Stripe customer
     let customer;
     if (saveCard) {
       customer = await stripe.customers.create({
-        email: req.user.email,
+        email: user.email,
         name: cardHolder,
         metadata: {
-          userId: userId.toString()
+          userId: user.userId.toString()
         }
       });
     }
@@ -54,160 +180,136 @@ exports.processStripePayment = async (req, res) => {
       confirm: true,
       return_url: `${process.env.FRONTEND_URL}/payment/success`,
       metadata: {
-        orderId: orderId.toString(),
-        userId: userId.toString()
+        orderId: order._id.toString(),
+        userId: user.userId.toString()
       }
     });
 
-    // Create payment record
-    const payment = new Payment({
-      user: userId,
-      order: orderId,
-      amount: order.total,
-      currency: order.currency,
-      paymentMethod: 'stripe',
-      stripePaymentIntentId: paymentIntent.id,
-      stripeCustomerId: customer?.id,
-      cardHolder: cardHolder,
-      status: paymentIntent.status === 'succeeded' ? 'completed' : 'processing'
-    });
+    console.log('Stripe payment intent created:', paymentIntent.id);
 
-    await payment.save();
+    const isCompleted = paymentIntent.status === 'succeeded';
 
-    // Update order payment status
-    if (paymentIntent.status === 'succeeded') {
-      order.paymentStatus = 'paid';
-      order.paidAt = new Date();
-      order.payment = payment._id;
-      await order.save();
-
-      // Update inventory
-      await updateInventory(order.items);
-
-      // Send confirmation email
-      await sendPaymentConfirmation(req.user.email, req.user.name, order, payment);
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Payment processed successfully',
-      data: {
-        paymentId: payment._id,
+    return {
+      status: isCompleted ? 'completed' : 'processing',
+      message: isCompleted ? 'Payment processed successfully' : 'Payment processing',
+      paymentData: {
+        stripePaymentIntentId: paymentIntent.id,
+        stripeCustomerId: customer?.id,
+        cardHolder: cardHolder,
+      },
+      responseData: {
         clientSecret: paymentIntent.client_secret,
-        status: paymentIntent.status
+        requiresAction: paymentIntent.status === 'requires_action',
+      },
+      metadata: {
+        stripeStatus: paymentIntent.status,
+        amountReceived: paymentIntent.amount_received
       }
-    });
+    };
 
   } catch (error) {
-    console.error('Stripe payment error:', error);
-    
-    // Create failed payment record
-    if (req.body.orderId) {
-      const failedPayment = new Payment({
-        user: req.user.userId,
-        order: req.body.orderId,
-        amount: 0,
-        currency: 'USD',
-        paymentMethod: 'stripe',
-        status: 'failed',
-        metadata: { error: error.message }
-      });
-      await failedPayment.save();
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Payment processing failed',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    console.error('Stripe payment processing error:', error);
+    throw new Error(`Stripe payment failed: ${error.message}`);
   }
 };
 
-// Process Paypack payment (MTN, Airtel, Tigo)
-exports.processPaypackPayment = async (req, res) => {
+// Process Paypack payment
+const processPaypackPayment = async (order, paymentData, user) => {
   try {
-    const { orderId, mobileNumber, provider } = req.body;
-    const userId = req.user.userId;
+    const { mobileNumber, provider } = paymentData;
 
-    // Validate order
-    const order = await Order.findById(orderId).populate('items.product');
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found'
-      });
+    console.log('Processing Paypack payment for order:', order._id);
+
+    // Validate mobile number format for Rwanda
+    const rwandaRegex = /^(078|079|072|073)\d{7}$/;
+    if (!rwandaRegex.test(mobileNumber)) {
+      throw new Error('Please provide a valid Rwanda mobile number (078, 079, 072, or 073)');
     }
 
-    if (order.user.toString() !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to pay for this order'
-      });
-    }
+    // Convert currency to RWF if needed (Paypack typically uses RWF)
+    const amount = order.currency === 'RWF' ? order.total : Math.round(order.total * 1200); // Approximate conversion
 
-    if (order.paymentStatus === 'paid') {
-      return res.status(400).json({
-        success: false,
-        message: 'Order is already paid'
-      });
-    }
-
-    // Simulate Paypack API call (replace with actual Paypack API)
-    const paypackResponse = await simulatePaypackPayment({
-      mobileNumber,
-      provider,
-      amount: order.total,
-      currency: order.currency
+    // Process Paypack payment
+    const paypackResponse = await paypack.cashin({
+      number: mobileNumber,
+      amount: amount,
+      environment: process.env.NODE_ENV === 'production' ? 'production' : 'development',
     });
 
-    // Create payment record
-    const payment = new Payment({
-      user: userId,
-      order: orderId,
-      amount: order.total,
-      currency: order.currency,
-      paymentMethod: `paypack-${provider}`,
-      paypackTransactionId: paypackResponse.transactionId,
-      paypackReference: paypackResponse.reference,
-      mobileNumber: mobileNumber,
-      provider: provider,
-      status: paypackResponse.status === 'success' ? 'completed' : 'failed'
-    });
+    console.log('Paypack API response:', paypackResponse);
 
-    await payment.save();
+    const isCompleted = paypackResponse.data.status === 'success';
 
-    if (paypackResponse.status === 'success') {
-      // Update order payment status
-      order.paymentStatus = 'paid';
-      order.paidAt = new Date();
-      order.payment = payment._id;
-      await order.save();
+    return {
+      status: isCompleted ? 'completed' : 'processing',
+      message: isCompleted ? 'Payment processed successfully' : 'Payment initiated. Please confirm on your mobile device.',
+      paymentData: {
+        paypackTransactionId: paypackResponse.data.ref,
+        paypackReference: paypackResponse.data.ref,
+        mobileNumber: mobileNumber,
+        provider: provider,
+      },
+      responseData: {
+        transactionId: paypackResponse.data.ref,
+        reference: paypackResponse.data.ref,
+        instructions: isCompleted ? undefined : 'Check your phone to confirm the payment'
+      },
+      metadata: {
+        paypackResponse: paypackResponse.data,
+        convertedAmount: amount
+      }
+    };
 
-      // Update inventory
-      await updateInventory(order.items);
+  } catch (error) {
+    console.error('Paypack payment processing error:', error);
+    throw new Error(`Mobile payment failed: ${error.message}`);
+  }
+};
 
-      // Send confirmation email
-      await sendPaymentConfirmation(req.user.email, req.user.name, order, payment);
+// Get payment methods configuration
+exports.getPaymentMethods = async (req, res) => {
+  try {
+    const paymentMethods = [];
+
+    // Check Stripe availability
+    if (process.env.STRIPE_SECRET_KEY) {
+      paymentMethods.push({
+        id: 'stripe',
+        name: 'Credit/Debit Card',
+        type: 'card',
+        currencies: ['USD', 'EUR', 'GBP'],
+        supportedCards: ['visa', 'mastercard', 'amex'],
+        enabled: true
+      });
     }
+
+    // Check Paypack availability
+    if (paypack) {
+      paymentMethods.push({
+        id: 'paypack',
+        name: 'Mobile Money',
+        type: 'mobile',
+        currencies: ['RWF'],
+        providers: ['mtn', 'airtel', 'tigo'],
+        enabled: true
+      });
+    }
+
+    console.log('Available payment methods:', paymentMethods);
 
     res.status(200).json({
-      success: paypackResponse.status === 'success',
-      message: paypackResponse.message,
+      success: true,
       data: {
-        paymentId: payment._id,
-        transactionId: paypackResponse.transactionId,
-        reference: paypackResponse.reference,
-        status: payment.status
+        paymentMethods,
+        defaultCurrency: process.env.DEFAULT_CURRENCY || 'USD'
       }
     });
 
   } catch (error) {
-    console.error('Paypack payment error:', error);
-    
+    console.error('Get payment methods error:', error);
     res.status(500).json({
       success: false,
-      message: 'Mobile payment processing failed',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Error fetching payment methods'
     });
   }
 };
@@ -216,6 +318,8 @@ exports.processPaypackPayment = async (req, res) => {
 exports.getPaymentStatus = async (req, res) => {
   try {
     const { paymentId } = req.params;
+
+    console.log('Checking payment status:', paymentId);
 
     const payment = await Payment.findById(paymentId)
       .populate('user', 'name email')
@@ -228,19 +332,34 @@ exports.getPaymentStatus = async (req, res) => {
       });
     }
 
-    // For Stripe payments, check current status
-    if (payment.paymentMethod === 'stripe' && payment.stripePaymentIntentId) {
+    // Check current status with provider if still processing
+    if (payment.status === 'processing') {
       try {
-        const paymentIntent = await stripe.paymentIntents.retrieve(
-          payment.stripePaymentIntentId
-        );
-        
-        if (paymentIntent.status !== payment.status) {
-          payment.status = paymentIntent.status;
-          await payment.save();
+        let currentStatus = payment.status;
+
+        if (payment.paymentMethod === 'stripe' && payment.stripePaymentIntentId) {
+          const paymentIntent = await stripe.paymentIntents.retrieve(
+            payment.stripePaymentIntentId
+          );
+          currentStatus = paymentIntent.status === 'succeeded' ? 'completed' : 'processing';
+        } 
+        else if (payment.paymentMethod === 'paypack' && payment.paypackTransactionId) {
+          // Implement Paypack transaction status check if available
+          // currentStatus = await checkPaypackTransactionStatus(payment.paypackTransactionId);
         }
-      } catch (stripeError) {
-        console.error('Stripe status check error:', stripeError);
+
+        // Update payment status if changed
+        if (currentStatus !== payment.status) {
+          payment.status = currentStatus;
+          await payment.save();
+
+          // Handle successful payment
+          if (currentStatus === 'completed' && payment.order) {
+            await handleSuccessfulPayment(payment.order, payment, payment.user);
+          }
+        }
+      } catch (statusError) {
+        console.error('Payment status check error:', statusError);
       }
     }
 
@@ -259,92 +378,234 @@ exports.getPaymentStatus = async (req, res) => {
   }
 };
 
-// Get payment statistics
-exports.getPaymentStats = async (req, res) => {
+// Webhook handler for both Stripe and Paypack
+exports.handleWebhook = async (req, res) => {
   try {
-    const { timeframe = 'daily' } = req.query;
-
-    const stats = await Payment.getPaymentStats(timeframe);
-
-    res.status(200).json({
-      success: true,
-      data: stats
+    const provider = req.headers['x-paypack-signature'] ? 'paypack' : 'stripe';
+    
+    console.log(`Webhook received from ${provider}:`, {
+      headers: req.headers,
+      body: req.body
     });
 
+    if (provider === 'stripe') {
+      await handleStripeWebhook(req, res);
+    } else {
+      await handlePaypackWebhook(req, res);
+    }
+
   } catch (error) {
-    console.error('Get payment stats error:', error);
+    console.error('Webhook handling error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching payment statistics',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Webhook processing failed'
     });
   }
 };
 
-// Get inventory statistics
-exports.getInventoryStats = async (req, res) => {
-  try {
-    const stats = await Product.getInventoryStats();
+// Stripe webhook handler
+const handleStripeWebhook = async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
 
-    res.status(200).json({
-      success: true,
-      data: stats
+  try {
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('Stripe webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  console.log('Stripe webhook event:', event.type);
+
+  // Handle the event
+  switch (event.type) {
+    case 'payment_intent.succeeded':
+      await handleStripePaymentSuccess(event.data.object);
+      break;
+    case 'payment_intent.payment_failed':
+      await handleStripePaymentFailed(event.data.object);
+      break;
+    default:
+      console.log(`Unhandled Stripe event type: ${event.type}`);
+  }
+
+  res.json({ received: true });
+};
+
+// Paypack webhook handler
+const handlePaypackWebhook = async (req, res) => {
+  const signature = req.headers['x-paypack-signature'];
+  const rawBody = JSON.stringify(req.body);
+
+  // Verify webhook signature
+  if (!verifyPaypackSignature(rawBody, signature)) {
+    console.error('Invalid Paypack webhook signature');
+    return res.status(403).json({
+      success: false,
+      message: 'Invalid signature'
+    });
+  }
+
+  const event = req.body;
+  console.log('Paypack webhook event:', event);
+
+  // Handle Paypack events
+  const { event: eventType, data } = event;
+  switch (eventType) {
+    case 'cashin.success':
+      await handlePaypackPaymentSuccess(data);
+      break;
+    case 'cashin.failed':
+      await handlePaypackPaymentFailed(data);
+      break;
+    default:
+      console.log('Unhandled Paypack event type:', eventType);
+  }
+
+  res.status(200).json({ success: true, message: 'Webhook processed' });
+};
+
+// Helper function to handle successful payments
+const handleSuccessfulPayment = async (order, payment, user) => {
+  try {
+    // Update order payment status
+    order.paymentStatus = 'paid';
+    order.paidAt = new Date();
+    order.payment = payment._id;
+    await order.save();
+
+    // Update inventory
+    await updateInventory(order.items);
+
+    // Send confirmation email
+    await sendPaymentConfirmation(user.email, user.name, order, payment);
+
+    console.log('Payment completed successfully:', {
+      orderId: order._id,
+      paymentId: payment._id,
+      amount: payment.amount,
+      provider: payment.paymentMethod
     });
 
   } catch (error) {
-    console.error('Get inventory stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching inventory statistics',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    console.error('Error handling successful payment:', error);
+    throw error;
   }
 };
 
-// Get order statistics
-exports.getOrderStats = async (req, res) => {
+// Stripe webhook handlers
+const handleStripePaymentSuccess = async (paymentIntent) => {
   try {
-    const { timeframe = 'daily' } = req.query;
+    const payment = await Payment.findOne({ 
+      stripePaymentIntentId: paymentIntent.id 
+    }).populate('order').populate('user');
 
-    const stats = await Order.getOrderStats(timeframe);
+    if (payment && payment.status !== 'completed') {
+      payment.status = 'completed';
+      await payment.save();
 
-    res.status(200).json({
-      success: true,
-      data: stats
-    });
-
+      if (payment.order) {
+        await handleSuccessfulPayment(payment.order, payment, payment.user);
+      }
+    }
   } catch (error) {
-    console.error('Get order stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching order statistics',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    console.error('Error handling Stripe payment success:', error);
+  }
+};
+
+const handleStripePaymentFailed = async (paymentIntent) => {
+  try {
+    const payment = await Payment.findOne({ 
+      stripePaymentIntentId: paymentIntent.id 
     });
+
+    if (payment) {
+      payment.status = 'failed';
+      payment.metadata = { 
+        ...payment.metadata, 
+        failureReason: paymentIntent.last_payment_error?.message 
+      };
+      await payment.save();
+    }
+  } catch (error) {
+    console.error('Error handling Stripe payment failure:', error);
+  }
+};
+
+// Paypack webhook handlers
+const handlePaypackPaymentSuccess = async (data) => {
+  try {
+    const payment = await Payment.findOne({ 
+      paypackTransactionId: data.ref 
+    }).populate('order').populate('user');
+
+    if (payment && payment.status !== 'completed') {
+      payment.status = 'completed';
+      await payment.save();
+
+      if (payment.order) {
+        await handleSuccessfulPayment(payment.order, payment, payment.user);
+      }
+    }
+  } catch (error) {
+    console.error('Error handling Paypack payment success:', error);
+  }
+};
+
+const handlePaypackPaymentFailed = async (data) => {
+  try {
+    const payment = await Payment.findOne({ 
+      paypackTransactionId: data.ref 
+    });
+
+    if (payment) {
+      payment.status = 'failed';
+      payment.metadata = { ...payment.metadata, failureReason: data.reason };
+      await payment.save();
+    }
+  } catch (error) {
+    console.error('Error handling Paypack payment failure:', error);
+  }
+};
+
+// Helper function to verify Paypack signature
+const verifyPaypackSignature = (rawBody, signature) => {
+  try {
+    const secret = process.env.PAYPACK_WEBHOOK_SECRET;
+    if (!secret) {
+      console.warn('Paypack webhook secret not configured');
+      return true; // Return true in development if secret not set
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(rawBody)
+      .digest('hex');
+
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expectedSignature)
+    );
+  } catch (error) {
+    console.error('Paypack signature verification error:', error);
+    return false;
   }
 };
 
 // Helper function to update inventory
 const updateInventory = async (orderItems) => {
-  for (const item of orderItems) {
-    await Product.findByIdAndUpdate(
-      item.product._id,
-      { $inc: { stock: -item.quantity } }
-    );
+  try {
+    for (const item of orderItems) {
+      await Product.findByIdAndUpdate(
+        item.product._id,
+        { $inc: { stock: -item.quantity } }
+      );
+    }
+    console.log('Inventory updated successfully');
+  } catch (error) {
+    console.error('Inventory update error:', error);
+    throw error;
   }
 };
 
-// Helper function to simulate Paypack payment (replace with actual API)
-const simulatePaypackPayment = async (paymentData) => {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  // Simulate successful payment 90% of the time
-  const isSuccess = Math.random() > 0.1;
-  
-  return {
-    transactionId: `PK${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
-    reference: `REF${Date.now()}`,
-    status: isSuccess ? 'success' : 'failed',
-    message: isSuccess ? 'Payment processed successfully' : 'Payment failed. Please try again.'
-  };
-};
+module.exports = exports;
