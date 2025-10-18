@@ -1,8 +1,14 @@
-const User = require('../models/User');
-const VerificationToken = require('../validation/VerificationToken');
-const { sendVerificationEmail, sendWelcomeEmail } = require('../mails/sendEmail');
-const { generateToken, generateRefreshToken } = require('../services/generateToken');
-const crypto = require('crypto');
+const User = require("../models/User");
+const VerificationToken = require("../validation/VerificationToken");
+const {
+  sendVerificationEmail,
+  sendWelcomeEmail,
+} = require("../mails/sendEmail");
+const {
+  generateToken,
+  generateRefreshToken,
+} = require("../services/generateToken");
+const crypto = require("crypto");
 
 // Register user
 exports.register = async (req, res) => {
@@ -13,21 +19,21 @@ exports.register = async (req, res) => {
     if (!name || !email || !password || !confirmPassword) {
       return res.status(400).json({
         success: false,
-        message: 'All fields are required'
+        message: "All fields are required",
       });
     }
 
     if (password !== confirmPassword) {
       return res.status(400).json({
         success: false,
-        message: 'Passwords do not match'
+        message: "Passwords do not match",
       });
     }
 
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
-        message: 'Password must be at least 6 characters long'
+        message: "Password must be at least 6 characters long",
       });
     }
 
@@ -36,7 +42,7 @@ exports.register = async (req, res) => {
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'User already exists with this email'
+        message: "User already exists with this email",
       });
     }
 
@@ -45,12 +51,12 @@ exports.register = async (req, res) => {
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password,
-      status: 'user', // Default status for new users
-      isVerified: process.env.NODE_ENV === 'development' // Auto-verify in dev
+      status: "user", // Default status for new users
+      isVerified: process.env.NODE_ENV === "development", // Auto-verify in dev
     });
 
     await user.save();
-    
+
     // Send welcome email only if verified
     if (user.isVerified) {
       await sendWelcomeEmail(user.email, user.name);
@@ -66,9 +72,10 @@ exports.register = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: process.env.NODE_ENV === 'development' 
-        ? 'Registration successful (auto-verified in development)' 
-        : 'Registration successful. Please verify your email.',
+      message:
+        process.env.NODE_ENV === "development"
+          ? "Registration successful (auto-verified in development)"
+          : "Registration successful. Please verify your email.",
       data: {
         user: {
           id: user._id,
@@ -77,16 +84,15 @@ exports.register = async (req, res) => {
           status: user.status,
           isVerified: user.isVerified,
         },
-        token
-      }
+        token,
+      },
     });
-
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error("Registration error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error during registration',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Server error during registration",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -99,25 +105,25 @@ exports.verifyEmail = async (req, res) => {
     if (!email || !verificationCode) {
       return res.status(400).json({
         success: false,
-        message: 'Email and verification code are required'
+        message: "Email and verification code are required",
       });
     }
 
-    const user = await User.findOne({ 
-      email: email.toLowerCase(), 
+    const user = await User.findOne({
+      email: email.toLowerCase(),
       verificationCode,
-      verificationCodeExpires: { $gt: Date.now() }
+      verificationCodeExpires: { $gt: Date.now() },
     });
 
     if (!user) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid or expired verification code'
+        message: "Invalid or expired verification code",
       });
     }
 
     user.isVerified = true;
-    user.status = 'user'; // Activate user status after verification
+    user.status = "user"; // Activate user status after verification
     user.verificationCode = undefined;
     user.verificationCodeExpires = undefined;
     await user.save();
@@ -131,7 +137,7 @@ exports.verifyEmail = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Email verified successfully',
+      message: "Email verified successfully",
       data: {
         token,
         refreshToken,
@@ -140,17 +146,16 @@ exports.verifyEmail = async (req, res) => {
           name: user.name,
           email: user.email,
           status: user.status,
-          isVerified: user.isVerified
-        }
-      }
+          isVerified: user.isVerified,
+        },
+      },
     });
-
   } catch (error) {
-    console.error('Email verification error:', error);
+    console.error("Email verification error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error during email verification',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Server error during email verification",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -163,7 +168,7 @@ exports.resendVerificationCode = async (req, res) => {
     if (!email) {
       return res.status(400).json({
         success: false,
-        message: 'Email is required'
+        message: "Email is required",
       });
     }
 
@@ -171,14 +176,14 @@ exports.resendVerificationCode = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: "User not found",
       });
     }
 
     if (user.isVerified) {
       return res.status(400).json({
         success: false,
-        message: 'Email is already verified'
+        message: "Email is already verified",
       });
     }
 
@@ -191,15 +196,14 @@ exports.resendVerificationCode = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Verification code sent successfully'
+      message: "Verification code sent successfully",
     });
-
   } catch (error) {
-    console.error('Resend verification error:', error);
+    console.error("Resend verification error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error while resending verification code',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Server error while resending verification code",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -213,45 +217,27 @@ exports.login = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Email and password are required'
+        message: "Email and password are required",
       });
     }
 
     // Find user and include password for comparison
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    const user = await User.findOne({ email: email.toLowerCase() }).select(
+      "+password"
+    );
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid email or password'
+        message: "Invalid email or password",
       });
     }
 
-    // Check user status
-    if (user.status === 'suspended') {
+    // Check if user has valid status (only admin, manager, or user allowed)
+    const allowedStatuses = ["admin", "manager", "user"];
+    if (!allowedStatuses.includes(user.status)) {
       return res.status(403).json({
         success: false,
-        message: 'Your account has been suspended. Please contact support.'
-      });
-    }
-
-    if (user.status === 'banned') {
-      return res.status(403).json({
-        success: false,
-        message: 'Your account has been permanently banned.'
-      });
-    }
-
-    if (user.status === 'inactive') {
-      return res.status(403).json({
-        success: false,
-        message: 'Your account is inactive. Please contact support to reactivate.'
-      });
-    }
-
-    if (user.status === 'pending') {
-      return res.status(403).json({
-        success: false,
-        message: 'Your account is pending approval. Please wait for administrator approval.'
+        message: "Your account status is not valid. Please contact support.",
       });
     }
 
@@ -259,7 +245,8 @@ exports.login = async (req, res) => {
     if (user.isLocked) {
       return res.status(423).json({
         success: false,
-        message: 'Account is temporarily locked due to too many failed attempts'
+        message:
+          "Account is temporarily locked due to too many failed attempts",
       });
     }
 
@@ -270,15 +257,7 @@ exports.login = async (req, res) => {
       await user.incrementLoginAttempts();
       return res.status(401).json({
         success: false,
-        message: 'Invalid email or password'
-      });
-    }
-
-    // Check if email is verified
-    if (!user.isVerified) {
-      return res.status(401).json({
-        success: false,
-        message: 'Please verify your email before logging in'
+        message: "Invalid email or password",
       });
     }
 
@@ -298,7 +277,7 @@ exports.login = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Login successful',
+      message: "Login successful",
       data: {
         token,
         refreshToken,
@@ -306,20 +285,19 @@ exports.login = async (req, res) => {
           id: user._id,
           name: user.name,
           email: user.email,
-          status: user.status,
+          status: user.status, // Only admin, manager, or user
           isVerified: user.isVerified,
           loginCount: user.loginCount,
-          lastLogin: user.lastLogin
-        }
-      }
+          lastLogin: user.lastLogin,
+        },
+      },
     });
-
   } catch (error) {
-    console.error('Login error:', error);
+    console.error("Login error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error during login',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Server error during login",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -328,11 +306,11 @@ exports.login = async (req, res) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: "User not found",
       });
     }
 
@@ -347,16 +325,16 @@ exports.getMe = async (req, res) => {
           isVerified: user.isVerified,
           loginCount: user.loginCount,
           lastLogin: user.lastLogin,
-          createdAt: user.createdAt
-        }
-      }
+          createdAt: user.createdAt,
+        },
+      },
     });
   } catch (error) {
-    console.error('Get user error:', error);
+    console.error("Get user error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching user data',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Server error while fetching user data",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -364,12 +342,12 @@ exports.getMe = async (req, res) => {
 // Get user status
 exports.getUserStatus = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
-    
+    const user = await User.findById(req.user.id).select("-password");
+
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: "User not found",
       });
     }
 
@@ -383,17 +361,16 @@ exports.getUserStatus = async (req, res) => {
           status: user.status,
           isVerified: user.isVerified,
           lastLogin: user.lastLogin,
-          createdAt: user.createdAt
-        }
-      }
+          createdAt: user.createdAt,
+        },
+      },
     });
-
   } catch (error) {
-    console.error('User status check error:', error);
+    console.error("User status check error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching user status',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Server error while fetching user status",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -408,7 +385,7 @@ exports.updateProfile = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: "User not found",
       });
     }
 
@@ -421,7 +398,7 @@ exports.updateProfile = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Profile updated successfully',
+      message: "Profile updated successfully",
       data: {
         user: {
           id: user._id,
@@ -430,17 +407,16 @@ exports.updateProfile = async (req, res) => {
           status: user.status,
           isVerified: user.isVerified,
           phone: user.phone,
-          address: user.address
-        }
-      }
+          address: user.address,
+        },
+      },
     });
-
   } catch (error) {
-    console.error('Update profile error:', error);
+    console.error("Update profile error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error while updating profile',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Server error while updating profile",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -453,26 +429,26 @@ exports.refreshToken = async (req, res) => {
     if (!refreshToken) {
       return res.status(401).json({
         success: false,
-        message: 'Refresh token required'
+        message: "Refresh token required",
       });
     }
 
-    const jwt = require('jsonwebtoken');
+    const jwt = require("jsonwebtoken");
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
     const user = await User.findById(decoded.id);
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid refresh token'
+        message: "Invalid refresh token",
       });
     }
 
     // Check user status
-    if (user.status === 'suspended' || user.status === 'banned') {
+    if (user.status === "suspended" || user.status === "banned") {
       return res.status(403).json({
         success: false,
-        message: `Account is ${user.status}. Access denied.`
+        message: `Account is ${user.status}. Access denied.`,
       });
     }
 
@@ -483,15 +459,14 @@ exports.refreshToken = async (req, res) => {
       success: true,
       data: {
         token: newToken,
-        refreshToken: newRefreshToken
-      }
+        refreshToken: newRefreshToken,
+      },
     });
-
   } catch (error) {
-    console.error('Refresh token error:', error);
+    console.error("Refresh token error:", error);
     res.status(401).json({
       success: false,
-      message: 'Invalid refresh token'
+      message: "Invalid refresh token",
     });
   }
 };
@@ -502,13 +477,13 @@ exports.logout = async (req, res) => {
     // In a real application, you might want to blacklist the token
     res.status(200).json({
       success: true,
-      message: 'Logged out successfully'
+      message: "Logged out successfully",
     });
   } catch (error) {
-    console.error('Logout error:', error);
+    console.error("Logout error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error during logout'
+      message: "Server error during logout",
     });
   }
 };
@@ -516,8 +491,8 @@ exports.logout = async (req, res) => {
 // Verify token (for frontend token validation)
 exports.verifyToken = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
-    
+    const user = await User.findById(req.user.id).select("-password");
+
     res.status(200).json({
       success: true,
       data: {
@@ -526,15 +501,15 @@ exports.verifyToken = async (req, res) => {
           name: user.name,
           email: user.email,
           status: user.status,
-          isVerified: user.isVerified
-        }
-      }
+          isVerified: user.isVerified,
+        },
+      },
     });
   } catch (error) {
-    console.error('Token verification error:', error);
+    console.error("Token verification error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error during token verification'
+      message: "Server error during token verification",
     });
   }
 };
