@@ -122,6 +122,14 @@ try {
   console.error('Error loading payment routes:', error);
 }
 
+// ✅ ADDED VIEWERS ROUTES
+try {
+  app.use('/views', require('./routes/contentViewRoutes'));
+  console.log('✅ Views routes loaded');
+} catch (error) {
+  console.error('Error loading viewers routes:', error);
+}
+
 // Health check route
 app.get('/health', (req, res) => {
   res.status(200).json({
