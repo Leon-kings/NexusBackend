@@ -13,7 +13,7 @@ const {
 router.post('/process', protect, validatePayment, paymentController.processPayment);
 
 // Get available payment methods
-router.get('/methods', protect, paymentController.getPaymentMethods);
+router.get('/methods', paymentController.getPaymentMethods);
 
 // Individual provider routes (for specific use cases)
 router.post('/stripe', protect, validateStripePayment, paymentController.processStripePayment);
