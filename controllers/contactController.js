@@ -1,6 +1,7 @@
 const Contact = require('../models/Contact');
 const User = require('../models/User');
 const { sendContactNotification, sendContactResponse } = require('../mails/sendEmail');
+const { createNotification } = require("./controllers/notificationController");
 
 // Create new contact submission
 exports.createContact = async (req, res) => {
@@ -38,7 +39,7 @@ exports.createContact = async (req, res) => {
     });
 
     await contact.save();
-
+    await createNotification("contact", "New contact message received!", contact._id);
     // Send notification emails
     try {
       // Send confirmation to user

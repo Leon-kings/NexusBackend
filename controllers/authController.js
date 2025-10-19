@@ -1,5 +1,6 @@
 const User = require("../models/User");
 const VerificationToken = require("../validation/VerificationToken");
+const { createNotification } = require("./controllers/notificationController");
 const {
   sendVerificationEmail,
   sendWelcomeEmail,
@@ -56,7 +57,7 @@ exports.register = async (req, res) => {
     });
 
     await user.save();
-
+    await createNotification("user", "New user registered!", user._id);
     // Send welcome email only if verified
     if (user.isVerified) {
       await sendWelcomeEmail(user.email, user.name);
