@@ -1,11 +1,6 @@
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 
-/**
- * @desc Get all sold products with quantity and revenue
- * @route GET /api/orders/sold-products
- * @access Private/Admin
- */
 exports.getSoldProducts = async (req, res) => {
   try {
     // Aggregate product sales info
@@ -47,11 +42,7 @@ exports.getSoldProducts = async (req, res) => {
   }
 };
 
-/**
- * @desc Get order statistics summary
- * @route GET /api/orders/stats
- * @access Private/Admin
- */
+
 exports.getOrderStats = async (req, res) => {
   try {
     const { timeframe = "daily" } = req.query;
@@ -67,11 +58,7 @@ exports.getOrderStats = async (req, res) => {
   }
 };
 
-/**
- * @desc Get all orders (with optional filters)
- * @route GET /api/orders
- * @access Private/Admin
- */
+
 exports.getAllOrders = async (req, res) => {
   try {
     const { status, paymentStatus, user } = req.query;
