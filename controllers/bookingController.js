@@ -1,5 +1,6 @@
 const Booking = require('../models/Booking');
 const { sendBookingConfirmation, sendBookingUpdate } = require('../mails/sendEmail');
+const { createNotification } = require("./controllers/notificationController");
 
 // Create new booking
 exports.createBooking = async (req, res) => {
@@ -40,7 +41,7 @@ exports.createBooking = async (req, res) => {
     booking.calculateProbability();
 
     await booking.save();
-
+    await createNotification("booking", "New booking made!", booking._id);
     // Send confirmation email to user
     try {
       await sendBookingConfirmation(booking.email, booking.name, booking.serviceType, booking._id);
