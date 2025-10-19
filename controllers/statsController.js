@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Contact = require('../models/Contact');
+const Product = require('../models/ProductStore');
 
 // Get comprehensive dashboard statistics
 exports.getDashboardStats = async (req, res) => {
@@ -9,9 +10,9 @@ exports.getDashboardStats = async (req, res) => {
     const verifiedUsers = await User.countDocuments({ isVerified: true });
     const unverifiedUsers = await User.countDocuments({ isVerified: false });
     const activeUsers = await User.countDocuments({ isActive: true });
-    const adminUsers = await User.countDocuments({ role: 'admin' });
-    const moderatorUsers = await User.countDocuments({ role: 'moderator' });
-    const regularUsers = await User.countDocuments({ role: 'user' });
+    const adminUsers = await User.countDocuments({ status: 'admin' });
+    const moderatorUsers = await User.countDocuments({ status: 'moderator' });
+    const regularUsers = await User.countDocuments({ status: 'user' });
     
     // Contact statistics
     const totalContacts = await Contact.countDocuments();
@@ -87,11 +88,11 @@ exports.getDashboardStats = async (req, res) => {
       lastLogin: { $gte: lastMonth }
     });
 
-    // Role-based stats
-    const roleStats = await User.aggregate([
+    // status-based stats
+    const statusStats = await User.aggregate([
       {
         $group: {
-          _id: '$role',
+          _id: '$status',
           count: { $sum: 1 },
           avgLogins: { $avg: '$loginCount' }
         }
@@ -102,7 +103,7 @@ exports.getDashboardStats = async (req, res) => {
     const topUsers = await User.find()
       .sort({ loginCount: -1 })
       .limit(10)
-      .select('name email role loginCount lastLogin isVerified');
+      .select('name email status loginCount lastLogin isVerified');
 
     res.status(200).json({
       success: true,
@@ -145,7 +146,7 @@ exports.getDashboardStats = async (req, res) => {
           contactResponseRate: totalContacts > 0 ? ((respondedContacts / totalContacts) * 100).toFixed(2) : 0,
           activeEngagementRate: totalUsers > 0 ? ((activeUsersThisWeek / totalUsers) * 100).toFixed(2) : 0
         },
-        roleStats,
+        statusStats,
         topUsers
       }
     });
@@ -167,9 +168,9 @@ exports.getUserStats = async (req, res) => {
     const verifiedUsers = await User.countDocuments({ isVerified: true });
     const unverifiedUsers = await User.countDocuments({ isVerified: false });
     const activeUsers = await User.countDocuments({ isActive: true });
-    const adminUsers = await User.countDocuments({ role: 'admin' });
-    const moderatorUsers = await User.countDocuments({ role: 'moderator' });
-    const regularUsers = await User.countDocuments({ role: 'user' });
+    const adminUsers = await User.countDocuments({ status: 'admin' });
+    const moderatorUsers = await User.countDocuments({ status: 'moderator' });
+    const regularUsers = await User.countDocuments({ status: 'user' });
     
     // Users registered in last 7 days
     const lastWeek = new Date();
@@ -209,11 +210,11 @@ exports.getUserStats = async (req, res) => {
       }
     ]);
 
-    // Users by role
-    const usersByRole = await User.aggregate([
+    // Users by status
+    const usersBystatus = await User.aggregate([
       {
         $group: {
-          _id: '$role',
+          _id: '$status',
           count: { $sum: 1 }
         }
       }
@@ -223,7 +224,7 @@ exports.getUserStats = async (req, res) => {
     const topUsers = await User.find()
       .sort({ loginCount: -1 })
       .limit(10)
-      .select('name email role loginCount lastLogin isVerified');
+      .select('name email status loginCount lastLogin isVerified');
 
     res.status(200).json({
       success: true,
@@ -242,7 +243,7 @@ exports.getUserStats = async (req, res) => {
           activeRate: totalUsers > 0 ? (recentlyActiveUsers / totalUsers * 100).toFixed(2) : 0
         },
         monthlyGrowth,
-        usersByRole,
+        usersBystatus,
         topUsers
       }
     });
@@ -409,6 +410,121 @@ exports.getContactStats = async (req, res) => {
       success: false,
       message: 'Server error while fetching contact statistics',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Get inventory statistics
+exports.getInventoryStats = async (req, res) => {
+  try {
+    const stats = await Product.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalProducts: { $sum: 1 },
+          totalStock: { $sum: '$stock' },
+          totalStockIn: { $sum: '$stockIn' },
+          totalStockOut: { $sum: '$stockOut' },
+          totalSold: { $sum: '$sold' },
+          totalValue: { $sum: { $multiply: ['$price', '$stock'] } },
+          averageRating: { $avg: '$rating' }
+        }
+      }
+    ]);
+
+    const categoryStats = await Product.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 },
+          totalStock: { $sum: '$stock' },
+          totalSold: { $sum: '$sold' }
+        }
+      }
+    ]);
+
+    const lowStockProducts = await Product.find({
+      stock: { $lte: 10 }
+    }).select('name stock price');
+
+    const result = {
+      overall: stats[0] || {
+        totalProducts: 0,
+        totalStock: 0,
+        totalStockIn: 0,
+        totalStockOut: 0,
+        totalSold: 0,
+        totalValue: 0,
+        averageRating: 0
+      },
+      byCategory: categoryStats,
+      lowStock: lowStockProducts,
+      stockStatus: {
+        inStock: await Product.countDocuments({ inStock: true }),
+        outOfStock: await Product.countDocuments({ inStock: false })
+      }
+    };
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Get sales statistics
+exports.getSalesStats = async (req, res) => {
+  try {
+    const { period = 'month' } = req.query;
+    
+    let groupFormat;
+    switch (period) {
+      case 'day':
+        groupFormat = { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } };
+        break;
+      case 'week':
+        groupFormat = { $dateToString: { format: '%Y-%U', date: '$createdAt' } };
+        break;
+      case 'year':
+        groupFormat = { $dateToString: { format: '%Y', date: '$createdAt' } };
+        break;
+      default:
+        groupFormat = { $dateToString: { format: '%Y-%m', date: '$createdAt' } };
+    }
+
+    const salesStats = await Product.aggregate([
+      {
+        $group: {
+          _id: groupFormat,
+          totalSales: { $sum: '$sold' },
+          totalRevenue: { $sum: { $multiply: ['$price', '$sold'] } },
+          productsSold: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const topSellingProducts = await Product.find()
+      .sort({ sold: -1 })
+      .limit(10)
+      .select('name sold price stock');
+
+    res.json({
+      success: true,
+      data: {
+        salesOverTime: salesStats,
+        topSellingProducts
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };

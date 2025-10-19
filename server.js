@@ -143,6 +143,13 @@ try {
 } catch (error) {
   console.error("Error loading notification routes:", error);
 }
+// ✅ ADDED PRODUCT-STOCKS ROUTES
+try {
+  app.use("/products", require("./routes/productRoutes"));
+  console.log("✅ Stock Products routes loaded");
+} catch (error) {
+  console.error("Error loading products routes:", error);
+}
 
 // Health check route
 app.get("/health", (req, res) => {
