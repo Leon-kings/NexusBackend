@@ -1,7 +1,7 @@
 const Contact = require('../models/Contact');
 const User = require('../models/User');
 const { sendContactNotification, sendContactResponse } = require('../mails/sendEmail');
-const { createNotification } = require("./controllers/notificationController");
+const { createNotification } = require("./notificationController");
 
 // Create new contact submission
 exports.createContact = async (req, res) => {

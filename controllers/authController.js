@@ -1,6 +1,6 @@
 const User = require("../models/User");
 const VerificationToken = require("../validation/VerificationToken");
-const { createNotification } = require("./controllers/notificationController");
+const { createNotification } = require("./notificationController");
 const {
   sendVerificationEmail,
   sendWelcomeEmail,

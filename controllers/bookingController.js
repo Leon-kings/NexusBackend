@@ -1,6 +1,6 @@
 const Booking = require('../models/Booking');
 const { sendBookingConfirmation, sendBookingUpdate } = require('../mails/sendEmail');
-const { createNotification } = require("./controllers/notificationController");
+const { createNotification } = require("./notificationController");
 
 // Create new booking
 exports.createBooking = async (req, res) => {
