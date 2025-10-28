@@ -107,7 +107,7 @@ const routes = [
   { path: "./routes/stats", name: "Stats", base: "/stats" },
   { path: "./routes/admin", name: "Admin", base: "/admin" },
   { path: "./routes/contact", name: "Contact", base: "/contact" },
-  { path: "./routes/questions", name: "Question", base: "/questions" },
+  { path: "./routes/question", name: "Question", base: "/questions" },
   { path: "./routes/booking", name: "Booking", base: "/bookings" },
   { path: "./routes/payments", name: "Payment", base: "/payments" },
   { path: "./routes/contentViewRoutes", name: "Views", base: "/views" },

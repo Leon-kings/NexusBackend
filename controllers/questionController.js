@@ -59,13 +59,15 @@ exports.createQuestion = async (req, res) => {
   }
 };
 
-// Get all questions (with filtering, sorting, pagination)
+// controllers/questionController.js
+
 exports.getAllQuestions = async (req, res) => {
   try {
+    // Destructure query parameters with defaults
     const {
       page = 1,
       limit = 10,
-      search,
+      search = '',
       status,
       category,
       priority,
@@ -74,10 +76,19 @@ exports.getAllQuestions = async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    const query = { isArchived: false };
-    
-    // Build search query
-    if (search) {
+    // Convert pagination values to integers
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+
+    // Build base query
+    const query = {};
+
+    // Only include isArchived filter if your model supports it
+    // (otherwise remove this line)
+    query.isArchived = false;
+
+    // 🔍 Search filter (case-insensitive)
+    if (search && search.trim() !== '') {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
@@ -85,38 +96,44 @@ exports.getAllQuestions = async (req, res) => {
         { message: { $regex: search, $options: 'i' } }
       ];
     }
-    
+
+    // 🎯 Additional filters
     if (status) query.status = status;
     if (category) query.category = category;
     if (priority) query.priority = priority;
     if (assignedTo) query.assignedTo = assignedTo;
 
+    // 🧾 Sorting
     const sortOptions = {};
     sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
+    // 🔍 Query execution
     const questions = await Question.find(query)
       .populate('assignedTo', 'name email')
       .populate('answer.answeredBy', 'name email')
       .sort(sortOptions)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
 
+    // 📊 Total count
     const total = await Question.countDocuments(query);
 
+    // ✅ Response
     res.status(200).json({
       success: true,
       data: {
         questions,
         pagination: {
-          current: parseInt(page),
-          pages: Math.ceil(total / limit),
-          total
+          currentPage: pageNum,
+          totalPages: Math.ceil(total / limitNum),
+          totalItems: total,
+          limit: limitNum
         }
       }
     });
 
   } catch (error) {
-    console.error('Get questions error:', error);
+    console.error('❌ Get questions error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error while fetching questions',
