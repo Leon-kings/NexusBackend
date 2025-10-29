@@ -7,7 +7,9 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 const { sendPaymentConfirmation } = require('../mails/sendEmail');
 
-// Initialize Paypack client
+// =============================
+// INITIALIZE PAYPACK
+// =============================
 let paypack;
 if (process.env.PAYPACK_CLIENT_ID && process.env.PAYPACK_CLIENT_SECRET) {
   paypack = new PaypackJs({
@@ -29,12 +31,9 @@ exports.processPayment = async (req, res) => {
     const { orderId, paymentMethod, paymentData } = req.body;
     const userId = req.user.userId;
 
-    console.log('Payment initiated:', {
-      orderId,
-      paymentMethod,
-      userId,
-    });
+    console.log('Payment initiated:', { orderId, paymentMethod, userId });
 
+    // 🧾 Find order
     const order = await Order.findById(orderId).populate('items.product');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
     if (order.user.toString() !== userId)
@@ -44,6 +43,7 @@ exports.processPayment = async (req, res) => {
 
     let paymentResult;
 
+    // 💳 Choose payment method
     switch (paymentMethod) {
       case 'stripe':
         if (!process.env.STRIPE_SECRET_KEY)
@@ -61,6 +61,7 @@ exports.processPayment = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Unsupported payment method' });
     }
 
+    // 💾 Save payment record
     const payment = new Payment({
       user: userId,
       order: orderId,
@@ -75,6 +76,7 @@ exports.processPayment = async (req, res) => {
     await payment.save();
     console.log('💳 Payment record saved:', payment._id);
 
+    // 🟢 Handle success
     if (paymentResult.status === 'completed') {
       await handleSuccessfulPayment(order, payment, req.user);
     }
@@ -92,6 +94,7 @@ exports.processPayment = async (req, res) => {
   } catch (error) {
     console.error('❌ Payment processing error:', error);
 
+    // Log failed payments
     if (req.body?.orderId) {
       await Payment.create({
         user: req.user.userId,
@@ -177,7 +180,7 @@ const processPaypackPayment = async (order, paymentData, user) => {
     const { mobileNumber, provider } = paymentData;
     console.log('Processing Paypack payment for order:', order._id);
 
-    const rwandaRegex = /^(078|794|457|7)\d{7}$/;
+    const rwandaRegex = /^(078|079|073|072|071|07[8-9])\d{6}$/;
     if (!rwandaRegex.test(mobileNumber)) {
       throw new Error('Invalid Rwanda mobile number format');
     }
@@ -216,7 +219,7 @@ const processPaypackPayment = async (order, paymentData, user) => {
 };
 
 // =============================
-// PAYMENT STATUS
+// PAYMENT STATUS CHECK
 // =============================
 exports.getPaymentStatus = async (req, res) => {
   try {
@@ -260,16 +263,19 @@ exports.getPaymentStatus = async (req, res) => {
 // =============================
 const handleSuccessfulPayment = async (order, payment, user) => {
   try {
-    order.paymentStatus = 'paid';
-    order.paidAt = new Date();
-    order.payment = payment._id;
-    await order.save();
+    const orderData = await Order.findById(order._id).populate('items.product');
+    if (!orderData) throw new Error('Order not found while handling payment');
 
-    await updateInventory(order.items);
-    await sendPaymentConfirmation(user.email, user.name, order, payment);
+    orderData.paymentStatus = 'paid';
+    orderData.paidAt = new Date();
+    orderData.payment = payment._id;
+    await orderData.save();
+
+    await updateInventory(orderData.items);
+    await sendPaymentConfirmation(user.email, user.name, orderData, payment);
 
     console.log('✅ Payment marked as completed:', {
-      orderId: order._id,
+      orderId: orderData._id,
       paymentId: payment._id,
     });
   } catch (error) {
@@ -284,5 +290,5 @@ const updateInventory = async (items) => {
   for (const item of items) {
     await Product.findByIdAndUpdate(item.product._id, { $inc: { stock: -item.quantity } });
   }
-  console.log('Inventory updated successfully');
+  console.log('✅ Inventory updated after successful payment');
 };
