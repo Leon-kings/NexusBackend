@@ -1,18 +1,10 @@
 const express = require("express");
 const router = express.Router();
-const {
-  getSoldProducts,
-  getOrderStats,
-  getAllOrders,
-} = require("../controllers/orderController");
+const orderController = require("../controllers/orderController");
 
-// GET /api/orders/sold-products
-router.get("/sold", getSoldProducts);
-
-// GET /api/orders/stats?timeframe=daily|weekly|monthly|yearly
-router.get("/stats", getOrderStats);
-
-// GET /api/orders
-router.get("/", getAllOrders);
+router.post("/", orderController.createOrder);
+router.get("/", orderController.getAllOrders);
+router.get("/sold", orderController.getSoldProducts);
+router.get("/stats", orderController.getOrderStats);
 
 module.exports = router;

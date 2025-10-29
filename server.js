@@ -55,8 +55,8 @@ const createDefaultAdmin = async () => {
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 150 * 60 * 1000,
+  max: 10000,
   message: {
     success: false,
     message: "Too many requests from this IP, please try again later.",
@@ -109,7 +109,7 @@ const routes = [
   { path: "./routes/contact", name: "Contact", base: "/contact" },
   { path: "./routes/question", name: "Question", base: "/questions" },
   { path: "./routes/booking", name: "Booking", base: "/bookings" },
-  { path: "./routes/payments", name: "Payment", base: "/payments" },
+  { path: "./routes/payment", name: "Payment", base: "/payments" },
   { path: "./routes/contentViewRoutes", name: "Views", base: "/views" },
   { path: "./routes/orderRoutes", name: "Orders", base: "/orders" },
   { path: "./routes/notificationRoutes", name: "Notification", base: "/notification" },

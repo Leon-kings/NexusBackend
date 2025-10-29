@@ -22,53 +22,20 @@ const productSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Category is required'],
     enum: [
-      'electronics',
-      'clothing',
-      'books',
-      'home-garden',
-      'sports',
-      'beauty',
-      'toys',
-      'food-beverages',
-      'digital-products',
-      'services',
-      'other',
+      'electronics', 'clothing', 'books', 'home-garden', 'sports', 'beauty',
+      'toys', 'food-beverages', 'digital-products', 'services', 'other',
     ],
   },
-  price: {
-    type: Number,
-    required: [true, 'Price is required'],
-    min: [0, 'Price cannot be negative'],
-  },
-  comparePrice: {
-    type: Number,
-    min: [0, 'Compare price cannot be negative'],
-  },
-  cost: {
-    type: Number,
-    min: [0, 'Cost cannot be negative'],
-  },
-  stock: {
-    type: Number,
-    required: [true, 'Stock quantity is required'],
-    min: [0, 'Stock cannot be negative'],
-    default: 0,
-  },
-  lowStockAlert: {
-    type: Number,
-    default: 10,
-  },
+  price: { type: Number, required: true, min: [0, 'Price cannot be negative'] },
+  comparePrice: { type: Number, min: [0, 'Compare price cannot be negative'] },
+  cost: { type: Number, min: [0, 'Cost cannot be negative'] },
+  stock: { type: Number, required: true, min: [0, 'Stock cannot be negative'], default: 0 },
+  lowStockAlert: { type: Number, default: 10 },
   images: [
     {
-      url: {
-        type: String,
-        required: true,
-      },
+      url: { type: String, required: true },
       alt: String,
-      isPrimary: {
-        type: Boolean,
-        default: false,
-      },
+      isPrimary: { type: Boolean, default: false },
     },
   ],
   variants: [
@@ -81,37 +48,17 @@ const productSchema = new mongoose.Schema({
     },
   ],
   tags: [String],
-  isActive: {
-    type: Boolean,
-    default: true,
-  },
-  isDigital: {
-    type: Boolean,
-    default: false,
-  },
-  weight: {
-    type: Number,
-    min: [0, 'Weight cannot be negative'],
-  },
-  dimensions: {
-    length: Number,
-    width: Number,
-    height: Number,
-  },
-  seo: {
-    title: String,
-    description: String,
-    slug: String,
-  },
-  metadata: {
-    type: mongoose.Schema.Types.Mixed,
-    default: {},
-  },
-}, {
-  timestamps: true, // automatically adds createdAt and updatedAt
-});
+  isActive: { type: Boolean, default: true },
+  isDigital: { type: Boolean, default: false },
+  weight: { type: Number, min: [0, 'Weight cannot be negative'] },
+  dimensions: { length: Number, width: Number, height: Number },
+  seo: { title: String, description: String, slug: String },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+}, { timestamps: true });
 
-// ✅ Indexes
+// =======================
+// Indexes
+// =======================
 productSchema.index({ category: 1 });
 productSchema.index({ sku: 1 });
 productSchema.index({ price: 1 });
@@ -119,9 +66,10 @@ productSchema.index({ stock: 1 });
 productSchema.index({ isActive: 1 });
 productSchema.index({ 'seo.slug': 1 });
 
-// ✅ Pre-save hook
+// =======================
+// Hooks
+// =======================
 productSchema.pre('save', function (next) {
-  // Generate slug if not provided
   if (!this.seo) this.seo = {};
   if (!this.seo.slug && this.name) {
     this.seo.slug = this.name
@@ -133,7 +81,9 @@ productSchema.pre('save', function (next) {
   next();
 });
 
-// ✅ Virtuals
+// =======================
+// Virtuals
+// =======================
 productSchema.virtual('inStock').get(function () {
   return this.stock > 0;
 });
@@ -147,7 +97,9 @@ productSchema.virtual('profitMargin').get(function () {
   return Number(((this.price - this.cost) / this.cost * 100).toFixed(2));
 });
 
-// ✅ Static method for inventory stats
+// =======================
+// Statics
+// =======================
 productSchema.statics.getInventoryStats = async function () {
   const stats = await this.aggregate([
     {
@@ -160,14 +112,11 @@ productSchema.statics.getInventoryStats = async function () {
           $sum: {
             $cond: [
               { $and: [{ $lte: ['$stock', '$lowStockAlert'] }, { $gt: ['$stock', 0] }] },
-              1,
-              0,
+              1, 0,
             ],
           },
         },
-        outOfStockCount: {
-          $sum: { $cond: [{ $eq: ['$stock', 0] }, 1, 0] },
-        },
+        outOfStockCount: { $sum: { $cond: [{ $eq: ['$stock', 0] }, 1, 0] } },
       },
     },
   ]);
@@ -184,30 +133,29 @@ productSchema.statics.getInventoryStats = async function () {
           $sum: {
             $cond: [
               { $and: [{ $lte: ['$stock', '$lowStockAlert'] }, { $gt: ['$stock', 0] }] },
-              1,
-              0,
+              1, 0,
             ],
           },
         },
-        outOfStockItems: {
-          $sum: { $cond: [{ $eq: ['$stock', 0] }, 1, 0] },
-        },
+        outOfStockItems: { $sum: { $cond: [{ $eq: ['$stock', 0] }, 1, 0] } },
       },
     },
   ]);
 
   return {
     byCategory: stats,
-    overview:
-      overallStats[0] || {
-        totalProducts: 0,
-        activeProducts: 0,
-        totalStockValue: 0,
-        averagePrice: 0,
-        lowStockItems: 0,
-        outOfStockItems: 0,
-      },
+    overview: overallStats[0] || {
+      totalProducts: 0,
+      activeProducts: 0,
+      totalStockValue: 0,
+      averagePrice: 0,
+      lowStockItems: 0,
+      outOfStockItems: 0,
+    },
   };
 };
 
-module.exports = mongoose.model('Product', productSchema);
+// =======================
+// Safe Export (Prevents “Cannot overwrite model” error)
+// =======================
+module.exports = mongoose.models.Product || mongoose.model('Product', productSchema);

@@ -1,12 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { processPayment, getPaymentStatus } = require('../controllers/paymentController');
-const { verifyToken } = require('../middleware/auth'); // adjust this if your JWT middleware has another name
+const paymentController = require('../controllers/paymentController');
+const { protect } = require('../middleware/auth'); // if using JWT auth
 
-// Create a new payment
-router.post('/', verifyToken, processPayment);
-
-// Get payment status
-router.get('/:paymentId/status', verifyToken, getPaymentStatus);
+router.post('/process', protect, paymentController.processPayment);
+router.get('/status/:paymentId', protect, paymentController.getPaymentStatus);
 
 module.exports = router;

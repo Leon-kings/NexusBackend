@@ -481,8 +481,8 @@ exports.getInventoryStats = async (req, res) => {
 exports.getSalesStats = async (req, res) => {
   try {
     const { period = 'month' } = req.query;
-    
     let groupFormat;
+
     switch (period) {
       case 'day':
         groupFormat = { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } };
@@ -503,10 +503,10 @@ exports.getSalesStats = async (req, res) => {
           _id: groupFormat,
           totalSales: { $sum: '$sold' },
           totalRevenue: { $sum: { $multiply: ['$price', '$sold'] } },
-          productsSold: { $sum: 1 }
-        }
+          productsSold: { $sum: 1 },
+        },
       },
-      { $sort: { _id: 1 } }
+      { $sort: { _id: 1 } },
     ]);
 
     const topSellingProducts = await Product.find()
@@ -518,13 +518,10 @@ exports.getSalesStats = async (req, res) => {
       success: true,
       data: {
         salesOverTime: salesStats,
-        topSellingProducts
-      }
+        topSellingProducts,
+      },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
