@@ -14,10 +14,15 @@ const crypto = require("crypto");
 // Register user
 exports.register = async (req, res) => {
   try {
+    console.log("Registration attempt started...");
     const { name, email, password, confirmPassword } = req.body;
+
+    // Log incoming request
+    console.log("Request body:", { name, email, password: password ? "***" : undefined, confirmPassword: confirmPassword ? "***" : undefined });
 
     // Validation
     if (!name || !email || !password || !confirmPassword) {
+      console.log("Validation failed: Missing fields");
       return res.status(400).json({
         success: false,
         message: "All fields are required",
@@ -25,6 +30,7 @@ exports.register = async (req, res) => {
     }
 
     if (password !== confirmPassword) {
+      console.log("Validation failed: Passwords don't match");
       return res.status(400).json({
         success: false,
         message: "Passwords do not match",
@@ -32,51 +38,106 @@ exports.register = async (req, res) => {
     }
 
     if (password.length < 6) {
+      console.log("Validation failed: Password too short");
       return res.status(400).json({
         success: false,
         message: "Password must be at least 6 characters long",
       });
     }
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address",
+      });
+    }
+
+    // Check database connection
+    try {
+      await require('mongoose').connection.db.admin().ping();
+      console.log("Database connection: OK");
+    } catch (dbError) {
+      console.error("Database connection failed:", dbError);
+      throw new Error("Database connection failed");
+    }
+
     // Check if user exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    console.log("Checking for existing user...");
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
     if (existingUser) {
+      console.log("User already exists with email:", email);
       return res.status(400).json({
         success: false,
         message: "User already exists with this email",
       });
     }
 
-    // Create user with status
-    const user = new User({
+    // Create user
+    console.log("Creating new user...");
+    const userData = {
       name: name.trim(),
       email: email.toLowerCase().trim(),
-      password,
-      status: "user", // Default status for new users
-      isVerified: process.env.NODE_ENV === "development", // Auto-verify in dev
-    });
+      password: password,
+      status: "user",
+      isVerified: process.env.NODE_ENV === "development",
+    };
 
+    console.log("User data to save:", { ...userData, password: "***" });
+
+    const user = new User(userData);
+
+    // Save user
+    console.log("Saving user to database...");
     await user.save();
-    await createNotification("user", "New user registered!", user._id);
-    // Send welcome email only if verified
-    if (user.isVerified) {
-      await sendWelcomeEmail(user.email, user.name);
-    } else {
-      // Send verification email if not auto-verified
-      const verificationCode = user.generateVerificationCode();
-      await user.save();
-      await sendVerificationEmail(user.email, verificationCode, user.name);
+    console.log("User saved successfully with ID:", user._id);
+
+    // Create notification (with error handling)
+    try {
+      console.log("Creating notification...");
+      await createNotification("user", "New user registered!", user._id);
+      console.log("Notification created successfully");
+    } catch (notificationError) {
+      console.warn("Notification creation failed, but continuing:", notificationError.message);
+      // Don't throw error, just log it
+    }
+
+    // Handle email sending
+    try {
+      if (user.isVerified) {
+        console.log("Sending welcome email...");
+        await sendWelcomeEmail(user.email, user.name);
+        console.log("Welcome email sent successfully");
+      } else {
+        console.log("Generating verification code and sending verification email...");
+        
+        // Check if generateVerificationCode method exists
+        if (typeof user.generateVerificationCode !== 'function') {
+          throw new Error('generateVerificationCode method not found in User model');
+        }
+        
+        const verificationCode = user.generateVerificationCode();
+        await user.save(); // Save the verification code
+        await sendVerificationEmail(user.email, verificationCode, user.name);
+        console.log("Verification email sent successfully");
+      }
+    } catch (emailError) {
+      console.warn("Email sending failed, but continuing:", emailError.message);
+      // Don't throw error, just log it - registration should still succeed
     }
 
     // Generate token
+    console.log("Generating authentication token...");
     const token = generateToken(user._id);
 
+    // Success response
+    console.log("Registration completed successfully");
     res.status(201).json({
       success: true,
-      message:
-        process.env.NODE_ENV === "development"
-          ? "Registration successful (auto-verified in development)"
-          : "Registration successful. Please verify your email.",
+      message: user.isVerified 
+        ? "Registration successful! You can now login." 
+        : "Registration successful! Please check your email to verify your account.",
       data: {
         user: {
           id: user._id,
@@ -88,12 +149,50 @@ exports.register = async (req, res) => {
         token,
       },
     });
+
   } catch (error) {
-    console.error("Registration error:", error);
+    console.error("=== REGISTRATION ERROR ===");
+    console.error("Error name:", error.name);
+    console.error("Error message:", error.message);
+    console.error("Error code:", error.code);
+    console.error("Error stack:", error.stack);
+    
+    // Handle specific MongoDB errors
+    if (error.name === 'MongoServerError') {
+      if (error.code === 11000) {
+        return res.status(400).json({
+          success: false,
+          message: "User already exists with this email",
+        });
+      }
+    }
+
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: errors,
+      });
+    }
+
+    // Handle CastError (invalid ID format)
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid data format",
+      });
+    }
+
+    // Generic server error
     res.status(500).json({
       success: false,
-      message: "Server error during registration",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+      message: "Registration failed. Please try again.",
+      error: process.env.NODE_ENV === "development" ? {
+        message: error.message,
+        stack: error.stack
+      } : undefined,
     });
   }
 };
