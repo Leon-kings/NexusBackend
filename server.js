@@ -113,7 +113,8 @@ const routes = [
   { path: "./routes/contentViewRoutes", name: "Views", base: "/views" },
   { path: "./routes/orderRoutes", name: "Orders", base: "/orders" },
   { path: "./routes/notificationRoutes", name: "Notification", base: "/notification" },
-  { path: "./routes/productRoutes", name: "Products", base: "/products" }
+  { path: "./routes/productRoutes", name: "Products", base: "/products" },
+    { path: "./routes/testimonialRoutes", name: "Testimony", base: "/testimonials" }
 ];
 
 let loadedRoutes = 0;
