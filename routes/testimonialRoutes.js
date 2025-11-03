@@ -1,21 +1,27 @@
 const express = require('express');
 const router = express.Router();
+const { upload } = require('../cloudinary/cloudinary');
 const {
   createTestimonial,
   getTestimonials,
-  getTestimonial,
+  getTestimonialById,
   updateTestimonial,
-  deleteTestimonial
+  deleteTestimonial,
 } = require('../controllers/testimonialController');
-const { uploadImage, handleUploadErrors } = require('../middleware/upload');
 
-// Public routes
+// Create testimonial with image upload
+router.post('/', upload.single('image'), createTestimonial);
+
+// Get all testimonials
 router.get('/', getTestimonials);
-router.get('/:id', getTestimonial);
 
-// Protected routes (add authentication middleware as needed)
-router.post('/', uploadImage, handleUploadErrors, createTestimonial);
-router.put('/:id', uploadImage, handleUploadErrors, updateTestimonial);
+// Get single testimonial
+router.get('/:id', getTestimonialById);
+
+// Update testimonial (with optional new image)
+router.put('/:id', upload.single('image'), updateTestimonial);
+
+// Delete testimonial
 router.delete('/:id', deleteTestimonial);
 
 module.exports = router;
