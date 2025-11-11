@@ -11,15 +11,15 @@ router.post('/', validateQuestion, questionController.createQuestion);
 // router.use(protect);
 
 router.get('/', questionController.getAllQuestions);
-router.get('/stats', authorize('admin', 'moderator'), questionController.getQuestionStats);
-router.get('/:id', authorize('admin', 'moderator'), questionController.getQuestionById);
-router.put('/:id', authorize('admin', 'moderator'), questionController.updateQuestion);
-router.post('/:id/answer', authorize('admin', 'moderator'), questionController.answerQuestion);
-router.post('/:id/notes', authorize('admin', 'moderator'), questionController.addNote);
-router.patch('/:id/archive', authorize('admin', 'moderator'), questionController.archiveQuestion);
-router.post('/bulk-update', authorize('admin'), questionController.bulkUpdateQuestions);
+router.get('/stats', questionController.getQuestionStats);
+router.get('/:id', questionController.getQuestionById);
+router.put('/:id', questionController.updateQuestion);
+router.post('/:id/answer', questionController.answerQuestion);
+router.post('/:id/notes', questionController.addNote);
+router.patch('/:id/archive', questionController.archiveQuestion);
+router.post('/bulk-update', questionController.bulkUpdateQuestions);
 
 // Admin only routes
-router.delete('/:id', authorize('admin'), questionController.deleteQuestion);
+router.delete('/:id', questionController.deleteQuestion);
 
 module.exports = router;

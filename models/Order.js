@@ -290,5 +290,5 @@ orderSchema.statics.getOrderStats = async function(timeframe = 'daily') {
     }
   };
 };
-
+ 
 module.exports = mongoose.model('Order', orderSchema);

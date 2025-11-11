@@ -75,16 +75,16 @@ app.use(express.urlencoded({ extended: true }));
 const loadRoute = (routePath, routeName, basePath = "/") => {
   try {
     const fullPath = path.resolve(__dirname, routePath);
-    
+
     // Check if file exists
-    if (!fs.existsSync(fullPath + '.js')) {
+    if (!fs.existsSync(fullPath + ".js")) {
       console.log(`❌ ${routeName} route file not found: ${routePath}.js`);
       return false;
     }
 
     const routeModule = require(routePath);
-    
-    if (routeModule && typeof routeModule === 'function') {
+
+    if (routeModule && typeof routeModule === "function") {
       app.use(basePath, routeModule);
       console.log(`✅ ${routeName} routes loaded at ${basePath}`);
       return true;
@@ -112,13 +112,26 @@ const routes = [
   { path: "./routes/payment", name: "Payment", base: "/payments" },
   { path: "./routes/contentViewRoutes", name: "Views", base: "/views" },
   { path: "./routes/orderRoutes", name: "Orders", base: "/orders" },
-  { path: "./routes/notificationRoutes", name: "Notification", base: "/notification" },
+  {
+    path: "./routes/notificationRoutes",
+    name: "Notification",
+    base: "/notification",
+  },
   { path: "./routes/productRoutes", name: "Products", base: "/products" },
-    { path: "./routes/testimonialRoutes", name: "Testimony", base: "/testimonials" }
+  {
+    path: "./routes/testimonialRoutes",
+    name: "Testimony",
+    base: "/testimonials",
+  },
+  {
+    path: "./routes/subscriptionRoutes",
+    name: "Subscription",
+    base: "/subscription",
+  },
 ];
 
 let loadedRoutes = 0;
-routes.forEach(route => {
+routes.forEach((route) => {
   if (loadRoute(route.path, route.name, route.base)) {
     loadedRoutes++;
   }
@@ -128,16 +141,39 @@ console.log(`📊 Routes loaded: ${loadedRoutes}/${routes.length}`);
 
 // Test endpoints for each route (optional - for debugging)
 app.get("/auth/test", (req, res) => res.json({ message: "Auth route works" }));
-app.get("/stats/test", (req, res) => res.json({ message: "Stats route works" }));
-app.get("/admin/test", (req, res) => res.json({ message: "Admin route works" }));
-app.get("/contact/test", (req, res) => res.json({ message: "Contact route works" }));
-app.get("/questions/test", (req, res) => res.json({ message: "Questions route works" }));
-app.get("/bookings/test", (req, res) => res.json({ message: "Bookings route works" }));
-app.get("/payments/test", (req, res) => res.json({ message: "Payments route works" }));
-app.get("/views/test", (req, res) => res.json({ message: "Views route works" }));
-app.get("/orders/test", (req, res) => res.json({ message: "Orders route works" }));
-app.get("/notification/test", (req, res) => res.json({ message: "Notification route works" }));
-app.get("/products/test", (req, res) => res.json({ message: "Products route works" }));
+app.get("/stats/test", (req, res) =>
+  res.json({ message: "Stats route works" })
+);
+app.get("/admin/test", (req, res) =>
+  res.json({ message: "Admin route works" })
+);
+app.get("/contact/test", (req, res) =>
+  res.json({ message: "Contact route works" })
+);
+app.get("/questions/test", (req, res) =>
+  res.json({ message: "Questions route works" })
+);
+app.get("/bookings/test", (req, res) =>
+  res.json({ message: "Bookings route works" })
+);
+app.get("/payments/test", (req, res) =>
+  res.json({ message: "Payments route works" })
+);
+app.get("/views/test", (req, res) =>
+  res.json({ message: "Views route works" })
+);
+app.get("/orders/test", (req, res) =>
+  res.json({ message: "Orders route works" })
+);
+app.get("/notification/test", (req, res) =>
+  res.json({ message: "Notification route works" })
+);
+app.get("/products/test", (req, res) =>
+  res.json({ message: "Products route works" })
+);
+app.get("/subscription/test", (req, res) =>
+  res.json({ message: "Subscription route works" })
+);
 
 // Health check route
 app.get("/health", (req, res) => {
@@ -147,7 +183,7 @@ app.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
     routes_loaded: loadedRoutes,
-    total_routes: routes.length
+    total_routes: routes.length,
   });
 });
 
@@ -157,8 +193,8 @@ app.get("/", (req, res) => {
     success: true,
     message: "Server is running successfully",
     timestamp: new Date().toISOString(),
-    available_routes: routes.map(r => r.base),
-    health_check: "/health"
+    available_routes: routes.map((r) => r.base),
+    health_check: "/health",
   });
 });
 
@@ -170,7 +206,7 @@ app.use((req, res, next) => {
     message: "Route not found",
     requested_url: req.originalUrl,
     method: req.method,
-    available_routes: routes.map(r => r.base)
+    available_routes: routes.map((r) => r.base),
   });
 });
 
@@ -180,7 +216,10 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     success: false,
     message: "Internal server error",
-    error: process.env.NODE_ENV === "development" ? err.message : "Something went wrong!"
+    error:
+      process.env.NODE_ENV === "development"
+        ? err.message
+        : "Something went wrong!",
   });
 });
 
@@ -188,7 +227,7 @@ app.use((err, req, res, next) => {
 const startServer = async () => {
   try {
     console.log("🔄 Starting server initialization...");
-    
+
     // Connect to database first
     await connectDB();
 
